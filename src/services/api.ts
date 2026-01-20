@@ -9,14 +9,15 @@ export function getApiBaseUrl() {
   if (raw) return raw.replace(/\/+$/, '')
 
   // Em DEV, o frontend roda em 5173 e a API em 3000.
-  if (import.meta.env.DEV) return 'http://localhost:3000'
+  if (import.meta.env.DEV) return 'http://76.13.81.8:3000'
+  // 'http://localhost:3000'
 
   // Em produção (Docker + Nginx), o ideal é ficar same-origin.
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin
   }
 
-  return 'http://localhost:3000'
+  return 'http://76.13.81.8:3000'
 }
 
 async function refreshAccessToken() {
