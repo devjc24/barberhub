@@ -4,7 +4,7 @@
     <div class="p-6 space-y-3">
       <h1 class="text-2xl font-semibold">Agenda</h1>
       <p class="text-sm text-gray-500 dark:text-gray-400">
-        Visão da agenda de agendamentos. Tela placeholder.
+        29 Visão da agenda de agendamentos. Tela placeholder.
       </p>
     </div>
   </AdminLayout>

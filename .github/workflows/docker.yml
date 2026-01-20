@@ -59,3 +59,42 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-vps:
+    name: Deploy to VPS (Docker Compose)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: deploy-main
+      cancel-in-progress: true
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -e
+
+            cd "${VPS_PATH:-${{ secrets.VPS_PATH }}}"
+
+            # Atualiza os arquivos do repo na VPS (ex: docker-compose.prod.yml, envs, nginx, etc.)
+            git fetch --all
+            git reset --hard origin/main
+
+            # Faz o compose apontar para as imagens publicadas no GHCR deste repo
+            export GITHUB_REPOSITORY='${{ github.repository }}'
+
+            # Login no GHCR (necessário se o repo/pacotes forem privados)
+            if [ -n "${{ secrets.GHCR_PAT }}" ] && [ -n "${{ secrets.GHCR_USERNAME }}" ]; then
+              echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+            fi
+
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Opcional: limpeza leve
+            docker image prune -f

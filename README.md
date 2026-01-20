@@ -27,10 +27,39 @@ npm run preview
 
 Este repositório contém:
 
-- `Dockerfile.web`: build do frontend (Vite) + Nginx servindo o `dist`
-- `Dockerfile.api`: API Node/Express (`backend/server.js`)
-- `docker-compose.yml`: modo "build no servidor" (ideal para Portainer Stack via Git)
-- `docker-compose.prod.yml`: modo "pull de imagens" (ideal com GitHub Actions + GHCR)
+
+## Deploy automático (VPS + Docker Compose)
+
+Este repositório publica as imagens no **GHCR** via GitHub Actions e pode fazer **deploy automático na VPS** via SSH rodando `docker compose`.
+
+### 1) Pré-requisitos na VPS
+
+- Docker + Docker Compose instalados.
+- O projeto clonado na VPS (ex.: `/opt/barberhub`) e com `docker-compose.prod.yml` no diretório.
+- Um usuário SSH com permissão para rodar docker (ex.: estar no grupo `docker`).
+
+### 2) Secrets no GitHub (Settings → Secrets and variables → Actions)
+
+Obrigatórios:
+- `VPS_HOST`: IP/DNS da VPS
+- `VPS_USER`: usuário SSH
+- `VPS_SSH_KEY`: chave privada (PEM) correspondente à chave pública na VPS
+- `VPS_PATH`: caminho do projeto na VPS (ex.: `/opt/barberhub`)
+
+Opcional:
+- `VPS_PORT`: porta SSH (se não for 22)
+
+Se as imagens do GHCR forem privadas, adicione também:
+- `GHCR_USERNAME`: seu usuário do GitHub
+- `GHCR_PAT`: token (classic) com permissão `read:packages` (e, se necessário, `repo`)
+
+### 3) O que acontece no deploy
+
+No push para a branch `main`, o workflow:
+- builda e publica `ghcr.io/<owner>/<repo>-api:main` e `ghcr.io/<owner>/<repo>-web:main`
+- conecta na VPS via SSH
+- atualiza o repositório na VPS (`git fetch` + `git reset --hard origin/main`)
+- executa `docker compose -f docker-compose.prod.yml pull` e `up -d`
 
 ### Opção A — Portainer / Stack via Git (recomendado se você quer "via link do GitHub")
 
@@ -55,16 +84,11 @@ docker compose -f docker-compose.prod.yml up -d
 
 Opcionalmente, você pode usar o workflow [Deploy to VPS](.github/workflows/deploy-vps.yml) (manual) com secrets:
 
-- `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`
-- `GHCR_PAT` (apenas se as imagens no GHCR estiverem privadas)
 
 ### Variáveis de ambiente
 
 Use `.env.example` como base. Para produção, é importante definir pelo menos:
 
-- `JWT_SECRET`
-- `DB_*` (host/usuário/senha/nome)
-- `GOOGLE_CLIENT_*`, `GOOGLE_REDIRECT_URI`, `GOOGLE_TOKEN_ENCRYPTION_KEY` (se usar Google Calendar)
 
 
 ## Author 
