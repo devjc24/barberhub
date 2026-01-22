@@ -1,115 +1,99 @@
-name: Deploy to VPS (Docker Compose)
+name: Deploy to VPS - BarberHub
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       remote_path:
-        description: "Pasta no servidor onde está o repositório clonado (onde está o compose)"
+        description: "Pasta no servidor (ex: /docker/barberhub)"
         required: false
-        default: "/opt/barberhub"
+        default: "/docker/barberhub"
       compose_file:
-        description: "Arquivo compose a usar (docker-compose.yml ou docker-compose.prod.yml)"
+        description: "Arquivo compose (docker-compose.yml ou docker-compose.prod.yml)"
         required: false
         default: "docker-compose.yml"
       prune:
-        description: "Limpar imagens/cache antigos (true/false)"
+        description: "Limpar imagens antigas (true/false)"
         required: false
         default: "true"
 
 concurrency:
-  group: deploy-vps-main
+  group: deploy-vps
   cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      REMOTE_PATH: ${{ github.event.inputs.remote_path || secrets.VPS_PATH || '/opt/barberhub' }}
-      COMPOSE_FILE: ${{ github.event.inputs.compose_file || secrets.VPS_COMPOSE_FILE || 'docker-compose.prod.yml' }}
-      PRUNE: ${{ github.event.inputs.prune || 'true' }}
-      DEPLOY_BRANCH: main
-      GHCR_PAT: ${{ secrets.GHCR_PAT }}
-      GHCR_USER: ${{ secrets.GHCR_USER || github.actor }}
-
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          port: ${{ secrets.VPS_PORT || '22' }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 30m
-          envs: REMOTE_PATH,COMPOSE_FILE,PRUNE,DEPLOY_BRANCH,GHCR_PAT,GHCR_USER
-          allenvs: false
-          script_stop: true
+          envs: REMOTE_PATH,COMPOSE_FILE,PRUNE
           script: |
-            set -Eeuo pipefail
+            set -euo pipefail
 
-            echo "== Deploy BarberHub =="
-            echo "REMOTE_PATH=$REMOTE_PATH"
-            echo "COMPOSE_FILE=$COMPOSE_FILE"
-            echo "DEPLOY_BRANCH=$DEPLOY_BRANCH"
+            # Valores com fallback dos inputs
+            REMOTE_PATH="${REMOTE_PATH:-${{ inputs.remote_path }}}"
+            COMPOSE_FILE="${COMPOSE_FILE:-${{ inputs.compose_file }}}"
+            PRUNE="${PRUNE:-${{ inputs.prune }}}"
 
+            echo "=== DEPLOY BARBERHUB ==="
+            echo "Pasta remota: $REMOTE_PATH"
+            echo "Compose file: $COMPOSE_FILE"
+            echo "Prune: $PRUNE"
+
+            # Verifica e entra no diretório
             if [ ! -d "$REMOTE_PATH" ]; then
-              echo "ERRO: REMOTE_PATH nao existe: $REMOTE_PATH" >&2
+              echo "ERRO: Diretório não existe: $REMOTE_PATH" >&2
               exit 1
             fi
-
             cd "$REMOTE_PATH"
 
-            if ! command -v git >/dev/null 2>&1; then
-              echo "ERRO: git nao encontrado na VPS" >&2
-              exit 1
+            echo "Arquivos no diretório:"
+            ls -la
+
+            # Git sync
+            if [ -d .git ]; then
+              echo "Atualizando código Git..."
+              git fetch origin --prune
+              git checkout main
+              git reset --hard origin/main
+              git clean -fd
+              echo "Commit atual: $(git rev-parse --short HEAD)"
+            else
+              echo "Aviso: .git não encontrado — código não será atualizado via git"
             fi
 
-            if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-              echo "ERRO: $REMOTE_PATH nao e um repositorio git (precisa ter o repo clonado ai)" >&2
-              exit 1
-            fi
-
-            echo "-- Git sync --"
-            git remote -v
-            git fetch --prune origin
-            git checkout "$DEPLOY_BRANCH"
-            git reset --hard "origin/$DEPLOY_BRANCH"
-            git clean -fd
-            echo "Commit atual: $(git rev-parse --short HEAD)"
-
+            # Verifica o compose file
             if [ ! -f "$COMPOSE_FILE" ]; then
-              echo "ERRO: compose file nao encontrado: $REMOTE_PATH/$COMPOSE_FILE" >&2
-              ls -la
+              echo "ERRO: $COMPOSE_FILE não encontrado!" >&2
+              echo "Arquivos disponíveis:"
+              ls -la docker-compose*.yml
               exit 1
             fi
 
-            echo "-- Docker info --"
-            docker version
-            docker compose version
+            echo "Configuração do compose válida"
+            docker compose -f "$COMPOSE_FILE" config > /dev/null
 
-            echo "-- Compose config check --"
-            docker compose -f "$COMPOSE_FILE" config >/dev/null
-
-            # Login opcional (somente se voce usa imagens privadas no GHCR)
-            if [ -n "${GHCR_PAT:-}" ]; then
-              echo "-- GHCR login --"
-              echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-github}" --password-stdin
-            fi
-
-            echo "-- Pull (se houver services com image:) --"
+            echo "Baixando imagens..."
             docker compose -f "$COMPOSE_FILE" pull || true
 
-            echo "-- Up (rebuild + restart) --"
+            echo "Subindo containers com build..."
             docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
-            echo "-- Status --"
+            echo "STATUS DOS CONTAINERS:"
             docker compose -f "$COMPOSE_FILE" ps
 
             if [ "$PRUNE" = "true" ]; then
-              echo "-- Prune --"
+              echo "Limpando imagens antigas..."
               docker image prune -f
-              docker builder prune -f --filter until=168h || true
             fi
+
+            echo "=== DEPLOY CONCLUÍDO COM SUCESSO! ==="
+            echo "BarberHub atualizado em https://seu-dominio.com"
