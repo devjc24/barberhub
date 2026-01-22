@@ -1,8 +1,8 @@
 services:
   api:
     build:
-      context: ./backend              # código Node está em backend/
-      dockerfile: ../Dockerfile.api   # Dockerfile.api está na raiz
+      context: .                      # raiz do repo (tem backend/, package.json, etc.)
+      dockerfile: Dockerfile.api
     restart: unless-stopped
     environment:
       PORT: 3000
@@ -30,7 +30,7 @@ services:
 
   web:
     build:
-      context: .                      # raiz tem package.json do Vue, src/, vite.config.ts
+      context: .                      # raiz (tem src/, vite.config.ts, package.json do Vue)
       dockerfile: Dockerfile.web
     restart: unless-stopped
     depends_on:
@@ -38,8 +38,6 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
-    environment:
-      VITE_BASE: ${VITE_BASE:-/}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
       interval: 10s
