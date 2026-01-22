@@ -90,6 +90,9 @@ jobs:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
       GHCR_USER: ${{ secrets.GHCR_USER || github.actor }}
     steps:
+      - name: Checkout (for compose file)
+        uses: actions/checkout@v4
+
       - name: Upload docker-compose.prod.yml to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
