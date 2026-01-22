@@ -90,6 +90,16 @@ jobs:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
       GHCR_USER: ${{ secrets.GHCR_USER || github.actor }}
     steps:
+      - name: Upload docker-compose.prod.yml to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: docker-compose.prod.yml
+          target: ${{ env.REMOTE_PATH }}
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -117,8 +127,9 @@ jobs:
             cd "$REMOTE_PATH"
             echo "Diretorio atual: $PWD"
 
-            if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            if command -v git >/dev/null 2>&1 && [ -d .git ]; then
               echo "-- Git sync --"
+              git config --global --add safe.directory "$PWD" || true
               git remote -v
               git fetch --prune origin
               git checkout "$DEPLOY_BRANCH"
