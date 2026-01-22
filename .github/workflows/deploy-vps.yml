@@ -1,22 +1,37 @@
 name: Deploy to VPS (Docker Compose)
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       remote_path:
-        description: 'Pasta no servidor onde está o compose (.yml + .env)'
-        required: true
-        default: '/opt/barberhub'
+        description: "Pasta no servidor onde está o repositório clonado (onde está o compose)"
+        required: false
+        default: "/opt/barberhub"
       compose_file:
-        description: 'Arquivo compose a usar (ex: docker-compose.yml ou docker-compose.prod.yml)'
-        required: true
-        default: 'docker-compose.yml'
+        description: "Arquivo compose a usar (docker-compose.yml ou docker-compose.prod.yml)"
+        required: false
+        default: "docker-compose.prod.yml"
+      prune:
+        description: "Limpar imagens/cache antigos (true/false)"
+        required: false
+        default: "true"
+
+concurrency:
+  group: deploy-vps-main
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      REMOTE_PATH: ${{ github.event.inputs.remote_path || secrets.VPS_PATH || '/opt/barberhub' }}
+      COMPOSE_FILE: ${{ github.event.inputs.compose_file || secrets.VPS_COMPOSE_FILE || 'docker-compose.prod.yml' }}
+      PRUNE: ${{ github.event.inputs.prune || 'true' }}
+      DEPLOY_BRANCH: main
 
     steps:
       - name: Deploy via SSH
@@ -24,19 +39,73 @@ jobs:
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 30m
+          script_stop: true
           script: |
-            set -e
-            cd "${{ inputs.remote_path }}"
+            set -Eeuo pipefail
 
-            # Necessário se suas imagens GHCR estiverem privadas.
-            if [ -n "${{ secrets.GHCR_PAT }}" ]; then
-              docker login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GHCR_PAT }}"
+            echo "== Deploy BarberHub =="
+            echo "REMOTE_PATH=$REMOTE_PATH"
+            echo "COMPOSE_FILE=$COMPOSE_FILE"
+            echo "DEPLOY_BRANCH=$DEPLOY_BRANCH"
+
+            if [ ! -d "$REMOTE_PATH" ]; then
+              echo "ERRO: REMOTE_PATH nao existe: $REMOTE_PATH" >&2
+              exit 1
             fi
 
-            export GITHUB_REPOSITORY="${{ github.repository }}"
+            cd "$REMOTE_PATH"
 
-            docker compose -f "${{ inputs.compose_file }}" pull
-            docker compose -f "${{ inputs.compose_file }}" up -d
+            if ! command -v git >/dev/null 2>&1; then
+              echo "ERRO: git nao encontrado na VPS" >&2
+              exit 1
+            fi
 
-            docker image prune -f
+            if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              echo "ERRO: $REMOTE_PATH nao e um repositorio git (precisa ter o repo clonado ai)" >&2
+              exit 1
+            fi
+
+            echo "-- Git sync --"
+            git remote -v
+            git fetch --prune origin
+            git checkout "$DEPLOY_BRANCH"
+            git reset --hard "origin/$DEPLOY_BRANCH"
+            git clean -fd
+            echo "Commit atual: $(git rev-parse --short HEAD)"
+
+            if [ ! -f "$COMPOSE_FILE" ]; then
+              echo "ERRO: compose file nao encontrado: $REMOTE_PATH/$COMPOSE_FILE" >&2
+              ls -la
+              exit 1
+            fi
+
+            echo "-- Docker info --"
+            docker version
+            docker compose version
+
+            echo "-- Compose config check --"
+            docker compose -f "$COMPOSE_FILE" config >/dev/null
+
+            # Login opcional (somente se voce usa imagens privadas no GHCR)
+            if [ -n "${GHCR_PAT:-}" ]; then
+              echo "-- GHCR login --"
+              echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-github}" --password-stdin
+            fi
+
+            echo "-- Pull (se houver services com image:) --"
+            docker compose -f "$COMPOSE_FILE" pull || true
+
+            echo "-- Up (rebuild + restart) --"
+            docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
+
+            echo "-- Status --"
+            docker compose -f "$COMPOSE_FILE" ps
+
+            if [ "$PRUNE" = "true" ]; then
+              echo "-- Prune --"
+              docker image prune -f
+              docker builder prune -f --filter until=168h || true
+            fi
