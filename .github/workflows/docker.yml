@@ -4,6 +4,19 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      remote_path:
+        description: "Pasta na VPS onde está o compose (.yml + .env)"
+        required: false
+        default: "/opt/barberhub"
+      compose_file:
+        description: "Arquivo compose a usar (docker-compose.prod.yml recomendado)"
+        required: false
+        default: "docker-compose.prod.yml"
+      prune:
+        description: "Limpar imagens/cache antigos (true/false)"
+        required: false
+        default: "true"
 
 env:
   REGISTRY: ghcr.io
@@ -68,6 +81,14 @@ jobs:
     concurrency:
       group: deploy-main
       cancel-in-progress: true
+    env:
+      REMOTE_PATH: ${{ github.event.inputs.remote_path || secrets.VPS_PATH || '/opt/barberhub' }}
+      COMPOSE_FILE: ${{ github.event.inputs.compose_file || secrets.VPS_COMPOSE_FILE || 'docker-compose.prod.yml' }}
+      PRUNE: ${{ github.event.inputs.prune || 'true' }}
+      DEPLOY_BRANCH: main
+      REPO_FOR_COMPOSE: ${{ github.repository }}
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}
+      GHCR_USER: ${{ secrets.GHCR_USER || github.actor }}
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -75,41 +96,78 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          command_timeout: 30m
+          envs: REMOTE_PATH,COMPOSE_FILE,PRUNE,DEPLOY_BRANCH,REPO_FOR_COMPOSE,GHCR_PAT,GHCR_USER
+          allenvs: false
+          script_stop: true
           script: |
-            set -e
+            set -Eeuo pipefail
 
-            cd /docker/barberhub || { echo "Erro: diretório /docker/barberhub não existe"; exit 1; }
+            echo "== Deploy BarberHub (docker.yml) =="
+            echo "REMOTE_PATH=$REMOTE_PATH"
+            echo "COMPOSE_FILE=$COMPOSE_FILE"
+            echo "DEPLOY_BRANCH=$DEPLOY_BRANCH"
 
-            if [ ! -d .git ]; then
-              echo "Erro: $PWD não parece ser um repositório git (faltando .git). Clone o repo nessa pasta ou ajuste VPS_PATH." >&2
+            if [ ! -d "$REMOTE_PATH" ]; then
+              echo "ERRO: REMOTE_PATH nao existe: $REMOTE_PATH" >&2
               exit 1
             fi
 
-            # Atualiza os arquivos do repo na VPS (ex: docker-compose.prod.yml, envs, nginx, etc.)
-            git fetch --all
-            git reset --hard origin/main
+            cd "$REMOTE_PATH"
+            echo "Diretorio atual: $PWD"
 
-            # Escolhe o compose: produção (pull de imagens) se existir; senão usa o padrão (build local)
-            COMPOSE_FILE="docker-compose.yml"
-            if [ -f docker-compose.prod.yml ]; then
-              COMPOSE_FILE="docker-compose.prod.yml"
-            fi
-
-            # Faz o compose apontar para as imagens publicadas no GHCR deste repo
-            export GITHUB_REPOSITORY='${{ github.repository }}'
-
-            # Login no GHCR (necessário se o repo/pacotes forem privados)
-            if [ -n "${{ secrets.GHCR_PAT }}" ] && [ -n "${{ secrets.GHCR_USERNAME }}" ]; then
-              echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
-            fi
-
-            if [ "$COMPOSE_FILE" = "docker-compose.prod.yml" ]; then
-              docker compose -f "$COMPOSE_FILE" pull
-              docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+            if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              echo "-- Git sync --"
+              git remote -v
+              git fetch --prune origin
+              git checkout "$DEPLOY_BRANCH"
+              git reset --hard "origin/$DEPLOY_BRANCH"
+              git clean -fd
+              echo "Commit atual: $(git rev-parse --short HEAD)"
             else
-              docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
+              echo "AVISO: sem repositorio git em $PWD; pulando git sync (ok se voce mantem compose/.env manualmente aqui)."
             fi
 
-            # Opcional: limpeza leve
-            docker image prune -f
+            if [ ! -f "$COMPOSE_FILE" ]; then
+              echo "AVISO: compose file informado nao encontrado: $PWD/$COMPOSE_FILE"
+              if [ -f docker-compose.prod.yml ]; then
+                COMPOSE_FILE="docker-compose.prod.yml"
+              elif [ -f docker-compose.yml ]; then
+                COMPOSE_FILE="docker-compose.yml"
+              else
+                echo "ERRO: nenhum docker-compose*.yml encontrado em $PWD" >&2
+                ls -la
+                exit 1
+              fi
+              echo "Usando compose fallback: $COMPOSE_FILE"
+            fi
+
+            echo "-- Docker info --"
+            docker version
+            docker compose version
+
+            echo "-- Compose config check --"
+            docker compose -f "$COMPOSE_FILE" config >/dev/null
+
+            export GITHUB_REPOSITORY="$REPO_FOR_COMPOSE"
+
+            if [ -n "${GHCR_PAT:-}" ]; then
+              echo "-- GHCR login --"
+              echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-github}" --password-stdin
+            fi
+
+            echo "-- Pull (image services) --"
+            docker compose -f "$COMPOSE_FILE" pull || true
+
+            echo "-- Up (rebuild if needed) --"
+            docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
+
+            echo "-- Status --"
+            docker compose -f "$COMPOSE_FILE" ps
+
+            if [ "$PRUNE" = "true" ]; then
+              echo "-- Prune --"
+              docker image prune -f
+              docker builder prune -f --filter until=168h || true
+            fi
