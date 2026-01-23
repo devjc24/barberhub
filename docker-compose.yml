@@ -55,7 +55,7 @@ services:
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -p\"$${MARIADB_ROOT_PASSWORD}\" --silent"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h 0.0.0.0 -uroot -p\"$${MARIADB_ROOT_PASSWORD}\" --silent"]
       interval: 10s
       timeout: 5s
       retries: 20
