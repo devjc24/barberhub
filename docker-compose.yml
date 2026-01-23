@@ -65,6 +65,7 @@ services:
   db-init:
     image: mariadb:11
     restart: "no"
+    network_mode: "service:db"
     depends_on:
       db:
         condition: service_healthy
@@ -77,11 +78,11 @@ services:
       - sh
       - -c
       - |
-        mariadb -h db -uroot -p"$MARIADB_ROOT_PASSWORD" -e "\
-        CREATE DATABASE IF NOT EXISTS \`$MARIADB_DATABASE\`;\
-        CREATE USER IF NOT EXISTS '$MARIADB_USER'@'%' IDENTIFIED BY '$MARIADB_PASSWORD';\
-        ALTER USER '$MARIADB_USER'@'%' IDENTIFIED BY '$MARIADB_PASSWORD';\
-        GRANT ALL PRIVILEGES ON \`$MARIADB_DATABASE\`.* TO '$MARIADB_USER'@'%';\
+        mariadb -h 127.0.0.1 -uroot -p"$$MARIADB_ROOT_PASSWORD" -e "\
+        CREATE DATABASE IF NOT EXISTS \`$$MARIADB_DATABASE\`;\
+        CREATE USER IF NOT EXISTS '$$MARIADB_USER'@'%' IDENTIFIED BY '$$MARIADB_PASSWORD';\
+        ALTER USER '$$MARIADB_USER'@'%' IDENTIFIED BY '$$MARIADB_PASSWORD';\
+        GRANT ALL PRIVILEGES ON \`$$MARIADB_DATABASE\`.* TO '$$MARIADB_USER'@'%';\
         FLUSH PRIVILEGES;\
         "
 
