@@ -3,6 +3,10 @@ FROM node:20-bookworm-slim as builder
 
 WORKDIR /app
 
+# Para Docker/VPS servindo na raiz (/) e não em /tailadmin-vuejs/
+# (evita 404 em /tailadmin-vuejs/assets/*)
+ENV VITE_BASE=/
+
 COPY package*.json ./
 RUN npm ci
 
