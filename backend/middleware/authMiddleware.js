@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken'
 
-const JWT_SECRET = 'chave_secreta_super_segura' // ideal: usar variável de ambiente em produção
+import { JWT_SECRET } from '../config/env.js'
 
 export const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization || ''
@@ -12,7 +12,7 @@ export const authMiddleware = (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET)
     req.user = decoded
     next()
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: 'Sessão expirada, faça login novamente.' })
   }
 }
