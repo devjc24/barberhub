@@ -1,5 +1,6 @@
 // Carrega variáveis de ambiente e centraliza configurações sensíveis
 // Pode ser expandido no futuro para usar dotenv.
+//DEVJC
 
 function requireEnv(name, fallback = '') {
   const value = process.env[name]
