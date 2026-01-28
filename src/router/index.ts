@@ -175,7 +175,7 @@ const router = createRouter({
     {
       path: '/agendamentos/agenda',
       name: 'AgendamentosAgenda',
-      component: () => import('../views/Agendamentos/Agenda.vue'),
+      redirect: '/calendar',
       meta: {
         title: 'Agendamentos - Agenda',
       },

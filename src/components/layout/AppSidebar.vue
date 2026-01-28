@@ -262,7 +262,7 @@ const menuGroups = [
         icon: CalenderIcon,
         name: "Agendamentos",
         subItems: [
-          { name: "Agenda", path: "/agendamentos/agenda", pro: false },
+          { name: "Agenda", path: "/calendar", pro: false },
           { name: "Novo Agendamento", path: "/agendamentos/novo", pro: false },
           { name: "Histórico", path: "/agendamentos/historico", pro: false },
         ],
